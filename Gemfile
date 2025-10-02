@@ -43,10 +43,10 @@ gem "thruster", require: false
 # gem "image_processing", "~> 1.2"
 
 # Slack API client
-gem 'slack-ruby-client'
+gem "slack-ruby-client"
 
 # 環境変数管理
-gem 'dotenv-rails', groups: [:development, :test]
+gem "dotenv-rails", groups: [ :development, :test ]
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
@@ -64,5 +64,5 @@ group :development do
   gem "web-console"
 
   # デバッグ用
-  gem 'pry-rails'
+  gem "pry-rails"
 end

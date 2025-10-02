@@ -13,7 +13,7 @@ class CreateSlackMessageTags < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :slack_message_tags, [:channel_id, :message_ts], unique: true
+    add_index :slack_message_tags, [ :channel_id, :message_ts ], unique: true
     add_index :slack_message_tags, :tags, using: :gin
     add_index :slack_message_tags, :tagged_at
   end
