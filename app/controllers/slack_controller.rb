@@ -180,14 +180,17 @@ class SlackController < ApplicationController
   end
 
   def aggregate_to_thread(tag, message_tag, metadata)
-    summary_channel = ENV['SLACK_SUMMARY_CHANNEL_ID'] # #tag-summary のチャンネルID
+    # ユーザーのDMチャンネルを取得
+    dm_channel = get_or_create_dm_channel(metadata['user_id'])
+    return unless dm_channel
 
-    # 既存のタグスレッドを探す
-    thread_ts = find_or_create_tag_thread(summary_channel, tag)
+    # ユーザーごとのタグスレッドを探す/作成
+    thread_ts = find_or_create_user_tag_thread(dm_channel, tag, metadata['user_id'])
+    return unless thread_ts
 
     # スレッドに返信を追加
     slack_client.chat_postMessage(
-      channel: summary_channel,
+      channel: dm_channel,
       thread_ts: thread_ts,
       text: format_tag_message(tag, message_tag, metadata)
     )
@@ -214,6 +217,44 @@ class SlackController < ApplicationController
     SlackMessageTag.where("tags @> ARRAY[?]::text[]", [tag]).update_all(thread_ts: thread_ts)
 
     thread_ts
+  end
+
+  # ユーザーのDMチャンネルを取得または作成
+  def get_or_create_dm_channel(user_id)
+    response = slack_client.conversations_open(users: user_id)
+    response['channel']['id']
+  rescue => e
+    Rails.logger.error("Failed to open DM channel: #{e.message}")
+    nil
+  end
+
+  # ユーザーごとのタグスレッドを探すか作成
+  def find_or_create_user_tag_thread(channel_id, tag, user_id)
+    # このユーザーのこのタグのスレッドを探す
+    existing = SlackMessageTag.where(user_id: user_id)
+                              .where("tags @> ARRAY[?]::text[]", [tag])
+                              .where.not(user_thread_ts: nil)
+                              .first
+
+    return existing.user_thread_ts if existing&.user_thread_ts
+
+    # なければ新規作成
+    response = slack_client.chat_postMessage(
+      channel: channel_id,
+      text: "🏷️ *#{tag}* タグのメッセージ一覧\n\nあなたがタグ付けしたメッセージが集約されます。"
+    )
+
+    thread_ts = response['ts']
+
+    # このユーザーのこのタグを持つメッセージに user_thread_ts を保存
+    SlackMessageTag.where(user_id: user_id)
+                   .where("tags @> ARRAY[?]::text[]", [tag])
+                   .update_all(user_thread_ts: thread_ts)
+
+    thread_ts
+  rescue => e
+    Rails.logger.error("Failed to create user tag thread: #{e.message}")
+    nil
   end
 
   def format_tag_message(tag, message_tag, metadata)

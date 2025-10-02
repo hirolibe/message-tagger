@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_02_150738) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_02_230815) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -25,8 +25,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_02_150738) do
     t.datetime "tagged_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "user_thread_ts"
     t.index ["channel_id", "message_ts"], name: "index_slack_message_tags_on_channel_id_and_message_ts", unique: true
     t.index ["tagged_at"], name: "index_slack_message_tags_on_tagged_at"
     t.index ["tags"], name: "index_slack_message_tags_on_tags", using: :gin
+    t.index ["user_id", "user_thread_ts"], name: "index_slack_message_tags_on_user_id_and_user_thread_ts"
   end
 end
