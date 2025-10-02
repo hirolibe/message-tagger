@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bundle install:*)",
+      "Bash(rails generate model:*)",
+      "Bash(rails:*)",
+      "Bash(pg_isready:*)",
+      "Bash(brew services start:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
