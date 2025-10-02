@@ -28,25 +28,89 @@ class SlackController < ApplicationController
   def open_tag_modal(payload)
     message = payload['message']
 
+    # 既存のメッセージにタグが付いているか確認
+    existing_tag = SlackMessageTag.find_by(
+      channel_id: payload['channel']['id'],
+      message_ts: message['ts']
+    )
+    existing_tags = existing_tag&.tags || []
+
+    # よく使われているタグを取得（頻度順、上位20件）
+    popular_tags = SlackMessageTag.pluck(:tags)
+                                  .flatten
+                                  .group_by(&:itself)
+                                  .transform_values(&:count)
+                                  .sort_by { |_, count| -count }
+                                  .first(20)
+                                  .map(&:first)
+
+    blocks = []
+
+    # 既存タグがあれば表示
+    if existing_tags.any?
+      blocks << {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: "*現在のタグ:* #{existing_tags.join(', ')}"
+        }
+      }
+    end
+
+    # 既存タグから選択（複数選択可能）
+    if popular_tags.any?
+      element_config = {
+        type: 'multi_static_select',
+        action_id: 'existing_tags_select',
+        placeholder: { type: 'plain_text', text: '既存のタグから選択' },
+        options: popular_tags.map { |tag|
+          {
+            text: { type: 'plain_text', text: tag },
+            value: tag
+          }
+        }
+      }
+
+      # 既存タグがある場合のみ initial_options を追加
+      if existing_tags.any?
+        element_config[:initial_options] = existing_tags.map { |tag|
+          {
+            text: { type: 'plain_text', text: tag },
+            value: tag
+          }
+        }
+      end
+
+      blocks << {
+        type: 'input',
+        block_id: 'existing_tags_block',
+        optional: true,
+        element: element_config,
+        label: { type: 'plain_text', text: '既存のタグから選択（複数可）' }
+      }
+    end
+
+    # 新しいタグを入力
+    blocks << {
+      type: 'input',
+      block_id: 'new_tags_block',
+      optional: true,
+      element: {
+        type: 'plain_text_input',
+        action_id: 'new_tags_input',
+        placeholder: { type: 'plain_text', text: '例: bug, 重要, 確認必要' }
+      },
+      label: { type: 'plain_text', text: '新しいタグを追加（カンマ区切り）' }
+    }
+
     slack_client.views_open(
       trigger_id: payload['trigger_id'],
       view: {
         type: 'modal',
         callback_id: 'tag_modal',
         title: { type: 'plain_text', text: 'タグを追加' },
-        submit: { type: 'plain_text', text: '追加' },
-        blocks: [
-          {
-            type: 'input',
-            block_id: 'tags_block',
-            element: {
-              type: 'plain_text_input',
-              action_id: 'tags_input',
-              placeholder: { type: 'plain_text', text: '例: bug, 重要, 確認必要' }
-            },
-            label: { type: 'plain_text', text: 'タグ（カンマ区切り）' }
-          }
-        ],
+        submit: { type: 'plain_text', text: '保存' },
+        blocks: blocks,
         private_metadata: JSON.generate({
           channel_id: payload['channel']['id'],
           message_ts: message['ts'],
@@ -62,8 +126,31 @@ class SlackController < ApplicationController
     return unless payload['view']['callback_id'] == 'tag_modal'
 
     metadata = JSON.parse(payload['view']['private_metadata'])
-    tags_input = payload['view']['state']['values']['tags_block']['tags_input']['value']
-    tags = tags_input.split(',').map(&:strip).reject(&:blank?)
+    values = payload['view']['state']['values']
+
+    # 既存タグから選択されたもの
+    selected_tags = []
+    if values['existing_tags_block']
+      selected = values['existing_tags_block']['existing_tags_select']['selected_options']
+      selected_tags = selected&.map { |opt| opt['value'] } || []
+    end
+
+    # 新規タグの入力
+    new_tags_input = values['new_tags_block']['new_tags_input']['value']
+    new_tags = new_tags_input.to_s.split(',').map(&:strip).reject(&:blank?)
+
+    # 両方を結合
+    tags = (selected_tags + new_tags).uniq
+
+    # タグが1つも選択・入力されていない場合はエラーを返す
+    if tags.empty?
+      return {
+        response_action: 'errors',
+        errors: {
+          new_tags_block: 'タグを1つ以上選択または入力してください'
+        }
+      }
+    end
 
     # データベースに保存
     message_tag = SlackMessageTag.find_or_initialize_by(
@@ -75,7 +162,10 @@ class SlackController < ApplicationController
     message_tag.message_text = metadata['message_text']
     message_tag.message_link = metadata['permalink']
     message_tag.tagged_at = Time.current
-    message_tag.add_tags(tags)
+
+    # タグを上書き（既存タグを選択し直した場合に対応）
+    message_tag.tags = tags
+    message_tag.save!
 
     # 元のメッセージに🏷️リアクションを追加
     add_reaction_to_message(metadata['channel_id'], metadata['message_ts'])
