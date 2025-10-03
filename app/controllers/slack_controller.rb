@@ -57,11 +57,11 @@ class SlackController < ApplicationController
       }
     end
 
-    # 既存タグから選択（複数選択可能）
+    # 既存タグから選択（単一選択）
     if popular_tags.any?
       element_config = {
-        type: "multi_static_select",
-        action_id: "existing_tags_select",
+        type: "static_select",
+        action_id: "existing_tag_select",
         placeholder: { type: "plain_text", text: "既存のタグから選択" },
         options: popular_tags.map { |tag|
           {
@@ -71,36 +71,34 @@ class SlackController < ApplicationController
         }
       }
 
-      # 既存タグがある場合のみ initial_options を追加
+      # 既存タグがある場合のみ initial_option を追加（単一）
       if existing_tags.any?
-        element_config[:initial_options] = existing_tags.map { |tag|
-          {
-            text: { type: "plain_text", text: tag },
-            value: tag
-          }
+        element_config[:initial_option] = {
+          text: { type: "plain_text", text: existing_tags.first },
+          value: existing_tags.first
         }
       end
 
       blocks << {
         type: "input",
-        block_id: "existing_tags_block",
+        block_id: "existing_tag_block",
         optional: true,
         element: element_config,
-        label: { type: "plain_text", text: "既存のタグから選択（複数可）" }
+        label: { type: "plain_text", text: "既存のタグから選択" }
       }
     end
 
-    # 新しいタグを入力
+    # または、新しいタグを入力
     blocks << {
       type: "input",
-      block_id: "new_tags_block",
+      block_id: "new_tag_block",
       optional: true,
       element: {
         type: "plain_text_input",
-        action_id: "new_tags_input",
-        placeholder: { type: "plain_text", text: "例: bug, 重要, 確認必要" }
+        action_id: "new_tag_input",
+        placeholder: { type: "plain_text", text: "例: bug" }
       },
-      label: { type: "plain_text", text: "新しいタグを追加（カンマ区切り）" }
+      label: { type: "plain_text", text: "または、新しいタグを入力" }
     }
 
     slack_client.views_open(
@@ -129,28 +127,31 @@ class SlackController < ApplicationController
     values = payload["view"]["state"]["values"]
 
     # 既存タグから選択されたもの
-    selected_tags = []
-    if values["existing_tags_block"]
-      selected = values["existing_tags_block"]["existing_tags_select"]["selected_options"]
-      selected_tags = selected&.map { |opt| opt["value"] } || []
+    selected_tag = nil
+    if values["existing_tag_block"]
+      selected = values["existing_tag_block"]["existing_tag_select"]["selected_option"]
+      selected_tag = selected["value"] if selected
     end
 
     # 新規タグの入力
-    new_tags_input = values["new_tags_block"]["new_tags_input"]["value"]
-    new_tags = new_tags_input.to_s.split(",").map(&:strip).reject(&:blank?)
+    new_tag_input = values["new_tag_block"]["new_tag_input"]["value"]
+    new_tag = new_tag_input.to_s.strip
 
-    # 両方を結合
-    tags = (selected_tags + new_tags).uniq
+    # どちらか一方を使用
+    tag = selected_tag || new_tag
 
-    # タグが1つも選択・入力されていない場合はエラーを返す
-    if tags.empty?
+    # タグが選択・入力されていない場合はエラーを返す
+    if tag.blank?
       return {
         response_action: "errors",
         errors: {
-          new_tags_block: "タグを1つ以上選択または入力してください"
+          new_tag_block: "タグを選択または入力してください"
         }
       }
     end
+
+    # 配列形式に変換（既存のロジックとの互換性のため）
+    tags = [tag]
 
     # データベースに保存
     message_tag = SlackMessageTag.find_or_initialize_by(
@@ -163,15 +164,12 @@ class SlackController < ApplicationController
     message_tag.message_link = metadata["permalink"]
     message_tag.tagged_at = Time.current
 
-    # タグを上書き（既存タグを選択し直した場合に対応）
-    message_tag.tags = tags
+    # タグを追加（既存のタグに新しいタグを追加）
+    message_tag.tags = (message_tag.tags + tags).uniq
     message_tag.save!
 
     # 非同期で処理を実行（Slackへの通信が遅い場合のため）
     Thread.new do
-      # 元のメッセージに🏷️リアクションを追加
-      add_reaction_to_message(metadata["channel_id"], metadata["message_ts"])
-
       # 元のメッセージのスレッドに返信
       reply_to_original_message(metadata, tags)
 
@@ -190,8 +188,8 @@ class SlackController < ApplicationController
     dm_channel = get_or_create_dm_channel(metadata["user_id"])
     return unless dm_channel
 
-    # ユーザーごとのタグスレッドを探す/作成
-    thread_ts = find_or_create_user_tag_thread(dm_channel, tag, metadata["user_id"])
+    # ユーザーごとのタグスレッドを探す/作成（message_tagを渡す）
+    thread_ts = find_or_create_user_tag_thread(dm_channel, tag, metadata["user_id"], message_tag)
     return unless thread_ts
 
     # スレッドに返信を追加
@@ -212,27 +210,24 @@ class SlackController < ApplicationController
   end
 
   # ユーザーごとのタグスレッドを探すか作成
-  def find_or_create_user_tag_thread(channel_id, tag, user_id)
-    # このユーザーのこのタグのスレッドを探す
-    existing = SlackMessageTag.where(user_id: user_id)
-                              .where("tags @> ARRAY[?]::text[]", [ tag ])
-                              .where.not(user_thread_ts: nil)
-                              .first
-
-    return existing.user_thread_ts if existing&.user_thread_ts
+  def find_or_create_user_tag_thread(channel_id, tag, user_id, message_tag)
+    # このメッセージのこのタグのスレッドを探す（tag_threadsから）
+    if message_tag.tag_threads && message_tag.tag_threads[tag]
+      return message_tag.tag_threads[tag]
+    end
 
     # なければ新規作成
     response = slack_client.chat_postMessage(
       channel: channel_id,
-      text: "🏷️ *#{tag}* タグのメッセージ一覧\n\nあなたがタグ付けしたメッセージが集約されます。"
+      text: "🏷️ *#{tag}*"
     )
 
     thread_ts = response["ts"]
 
-    # このユーザーのこのタグを持つメッセージに user_thread_ts を保存
-    SlackMessageTag.where(user_id: user_id)
-                   .where("tags @> ARRAY[?]::text[]", [ tag ])
-                   .update_all(user_thread_ts: thread_ts)
+    # このタグのスレッドIDを保存
+    message_tag.tag_threads ||= {}
+    message_tag.tag_threads[tag] = thread_ts
+    message_tag.save!
 
     thread_ts
   rescue => e
@@ -241,11 +236,7 @@ class SlackController < ApplicationController
   end
 
   def format_tag_message(tag, message_tag, metadata)
-    timestamp = message_tag.tagged_at.strftime("%Y-%m-%d %H:%M")
-    user_mention = "<@#{metadata['user_id']}>"
-
     <<~TEXT
-      [#{timestamp}] #{user_mention}
       #{metadata['message_text'].truncate(200)}
       → <#{metadata['permalink']}|元のメッセージを見る>
     TEXT
@@ -265,25 +256,12 @@ class SlackController < ApplicationController
     @slack_client ||= Slack::Web::Client.new(token: ENV["SLACK_BOT_TOKEN"])
   end
 
-  # 元のメッセージに🏷️リアクションを追加
-  def add_reaction_to_message(channel_id, message_ts)
-    slack_client.reactions_add(
-      channel: channel_id,
-      name: "label",  # 🏷️絵文字
-      timestamp: message_ts
-    )
-  rescue Slack::Web::Api::Errors::AlreadyReacted
-    # 既にリアクション済みの場合は無視
-  rescue => e
-    Rails.logger.error("Failed to add reaction: #{e.message}")
-  end
-
   # 元のメッセージのスレッドに返信を投稿
   def reply_to_original_message(metadata, tags)
     slack_client.chat_postMessage(
       channel: metadata["channel_id"],
       thread_ts: metadata["message_ts"],
-      text: "🏷️ タグを追加しました: #{tags.join(', ')}"
+      text: "<@#{metadata['user_id']}> さんが `#{tags.first}` 🏷️ タグをつけました"
     )
   rescue => e
     Rails.logger.error("Failed to post thread reply: #{e.message}")
