@@ -46,17 +46,6 @@ class SlackController < ApplicationController
 
     blocks = []
 
-    # 既存タグがあれば表示
-    if existing_tags.any?
-      blocks << {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: "*現在のタグ:* #{existing_tags.join(', ')}"
-        }
-      }
-    end
-
     # 既存タグから選択（単一選択）
     if popular_tags.any?
       element_config = {
