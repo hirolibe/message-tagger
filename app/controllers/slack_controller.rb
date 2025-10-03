@@ -167,16 +167,22 @@ class SlackController < ApplicationController
     message_tag.tags = tags
     message_tag.save!
 
-    # 元のメッセージに🏷️リアクションを追加
-    add_reaction_to_message(metadata["channel_id"], metadata["message_ts"])
+    # 非同期で処理を実行（Slackへの通信が遅い場合のため）
+    Thread.new do
+      # 元のメッセージに🏷️リアクションを追加
+      add_reaction_to_message(metadata["channel_id"], metadata["message_ts"])
 
-    # 元のメッセージのスレッドに返信
-    reply_to_original_message(metadata, tags)
+      # 元のメッセージのスレッドに返信
+      reply_to_original_message(metadata, tags)
 
-    # 各タグごとにスレッドに集約
-    tags.each do |tag|
-      aggregate_to_thread(tag, message_tag, metadata)
+      # 各タグごとにスレッドに集約
+      tags.each do |tag|
+        aggregate_to_thread(tag, message_tag, metadata)
+      end
     end
+
+    # 何も返さない（モーダルを閉じる）
+    nil
   end
 
   def aggregate_to_thread(tag, message_tag, metadata)
