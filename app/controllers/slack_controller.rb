@@ -48,31 +48,21 @@ class SlackController < ApplicationController
 
     # 既存タグから選択（単一選択）
     if popular_tags.any?
-      element_config = {
-        type: "static_select",
-        action_id: "existing_tag_select",
-        placeholder: { type: "plain_text", text: "既存のタグから選択" },
-        options: popular_tags.map { |tag|
-          {
-            text: { type: "plain_text", text: tag },
-            value: tag
-          }
-        }
-      }
-
-      # 既存タグがある場合のみ initial_option を追加（単一）
-      if existing_tags.any?
-        element_config[:initial_option] = {
-          text: { type: "plain_text", text: existing_tags.first },
-          value: existing_tags.first
-        }
-      end
-
       blocks << {
         type: "input",
         block_id: "existing_tag_block",
         optional: true,
-        element: element_config,
+        element: {
+          type: "static_select",
+          action_id: "existing_tag_select",
+          placeholder: { type: "plain_text", text: "既存のタグから選択" },
+          options: popular_tags.map { |tag|
+            {
+              text: { type: "plain_text", text: tag },
+              value: tag
+            }
+          }
+        },
         label: { type: "plain_text", text: "既存のタグから選択" }
       }
     end
@@ -115,6 +105,10 @@ class SlackController < ApplicationController
     metadata = JSON.parse(payload["view"]["private_metadata"])
     values = payload["view"]["state"]["values"]
 
+    # 新規タグの入力
+    new_tag_input = values["new_tag_block"]["new_tag_input"]["value"]
+    new_tag = new_tag_input.to_s.strip
+
     # 既存タグから選択されたもの
     selected_tag = nil
     if values["existing_tag_block"]
@@ -122,12 +116,9 @@ class SlackController < ApplicationController
       selected_tag = selected["value"] if selected
     end
 
-    # 新規タグの入力
-    new_tag_input = values["new_tag_block"]["new_tag_input"]["value"]
-    new_tag = new_tag_input.to_s.strip
-
-    # どちらか一方を使用
-    tag = selected_tag || new_tag
+    # 新規タグが入力されていれば、それを優先（既存選択は無視）
+    # そうでなければ既存選択を使用
+    tag = new_tag.present? ? new_tag : selected_tag
 
     # タグが選択・入力されていない場合はエラーを返す
     if tag.blank?
