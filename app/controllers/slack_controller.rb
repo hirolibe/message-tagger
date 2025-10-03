@@ -196,29 +196,6 @@ class SlackController < ApplicationController
     )
   end
 
-  def find_or_create_tag_thread(channel_id, tag)
-    # まず既存のスレッドを探す（データベースから）
-    existing = SlackMessageTag.where("tags @> ARRAY[?]::text[]", [ tag ])
-                              .where.not(thread_ts: nil)
-                              .first
-
-    return existing.thread_ts if existing&.thread_ts
-
-    # なければ新規作成
-    response = slack_client.chat_postMessage(
-      channel: channel_id,
-      text: "🏷️ *#{tag}* タグのメッセージ一覧\n\nこのスレッドに「#{tag}」タグが付けられたメッセージが集約されます。"
-    )
-
-    # thread_tsを保存
-    thread_ts = response["ts"]
-
-    # このタグを持つ全てのメッセージに thread_ts を保存
-    SlackMessageTag.where("tags @> ARRAY[?]::text[]", [ tag ]).update_all(thread_ts: thread_ts)
-
-    thread_ts
-  end
-
   # ユーザーのDMチャンネルを取得または作成
   def get_or_create_dm_channel(user_id)
     response = slack_client.conversations_open(users: user_id)
