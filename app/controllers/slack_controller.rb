@@ -75,7 +75,7 @@ class SlackController < ApplicationController
       element: {
         type: "plain_text_input",
         action_id: "new_tag_input",
-        placeholder: { type: "plain_text", text: "例: bug" }
+        placeholder: { type: "plain_text", text: "例: Rails" }
       },
       label: { type: "plain_text", text: "または、新しいタグを入力" }
     }
@@ -85,7 +85,7 @@ class SlackController < ApplicationController
       view: {
         type: "modal",
         callback_id: "tag_modal",
-        title: { type: "plain_text", text: "タグを追加" },
+        title: { type: "plain_text", text: "タグをつける" },
         submit: { type: "plain_text", text: "保存" },
         blocks: blocks,
         private_metadata: JSON.generate({
