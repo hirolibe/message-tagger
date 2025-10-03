@@ -131,7 +131,7 @@ class SlackController < ApplicationController
     end
 
     # 配列形式に変換（既存のロジックとの互換性のため）
-    tags = [tag]
+    tags = [ tag ]
 
     # データベースに保存
     message_tag = SlackMessageTag.find_or_initialize_by(
