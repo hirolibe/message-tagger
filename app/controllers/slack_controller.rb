@@ -80,6 +80,9 @@ class SlackController < ApplicationController
       label: { type: "plain_text", text: "または、新しいタグを入力" }
     }
 
+    # メッセージ投稿者の情報を取得
+    message_user_info = get_user_info(message["user"])
+    
     slack_client.views_open(
       trigger_id: payload["trigger_id"],
       view: {
@@ -92,6 +95,8 @@ class SlackController < ApplicationController
           channel_id: payload["channel"]["id"],
           message_ts: message["ts"],
           user_id: payload["user"]["id"],
+          message_user_id: message["user"],
+          message_user_name: message_user_info&.dig("user", "real_name") || message_user_info&.dig("user", "name") || "Unknown",
           message_text: message["text"],
           permalink: message_permalink(payload["channel"]["id"], message["ts"])
         })
@@ -217,9 +222,9 @@ class SlackController < ApplicationController
   end
 
   def format_tag_message(tag, message_tag, metadata)
+    user_name = metadata['message_user_name'] || "Unknown"
     <<~TEXT
-      <@#{metadata['user_id']}> さんのメッセージ
-      → <#{metadata['permalink']}|元のメッセージを見る>
+      <#{metadata['permalink']}|@#{user_name} さんのメッセージ>
     TEXT
   end
 
@@ -229,6 +234,12 @@ class SlackController < ApplicationController
       message_ts: message_ts
     )
     response["permalink"]
+  rescue
+    nil
+  end
+
+  def get_user_info(user_id)
+    slack_client.users_info(user: user_id)
   rescue
     nil
   end
