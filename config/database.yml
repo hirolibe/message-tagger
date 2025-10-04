@@ -16,8 +16,5 @@ test:
   database: message_tagger_test
 
 production:
-  primary: &primary_production
-    <<: *default
-    database: message_tagger_production
-    username: message_tagger
-    password: <%= ENV["MESSAGE_TAGGER_DATABASE_PASSWORD"] %>
+  <<: *default
+  url: <%= ENV["DATABASE_URL"] %>
