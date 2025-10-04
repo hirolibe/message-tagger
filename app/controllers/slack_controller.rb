@@ -292,12 +292,12 @@ class SlackController < ApplicationController
     # ボタンのvalueから message_tag_id と tag を取得
     message_tag_id, tag = action["value"].split(":")
     message_tag = SlackMessageTag.find_by(id: message_tag_id)
-    
+
     return unless message_tag
 
     # データベースからタグを削除
     message_tag.tags.delete(tag)
-    
+
     if message_tag.tags.empty?
       # タグがすべて削除されたらレコード自体を削除
       message_tag.destroy
