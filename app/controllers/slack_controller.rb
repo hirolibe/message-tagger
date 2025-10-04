@@ -224,9 +224,20 @@ class SlackController < ApplicationController
 
   # ユーザーごとのタグスレッドを探すか作成
   def find_or_create_user_tag_thread(channel_id, tag, user_id, message_tag)
-    # このメッセージのこのタグのスレッドを探す（tag_threadsから）
-    if message_tag.tag_threads && message_tag.tag_threads[tag]
-      return message_tag.tag_threads[tag]
+    # 同じユーザー、同じタグのスレッドを全メッセージから探す
+    existing_message = SlackMessageTag.where(user_id: user_id)
+                                      .where("tag_threads ? :tag", tag: tag)
+                                      .first
+
+    if existing_message && existing_message.tag_threads[tag]
+      thread_ts = existing_message.tag_threads[tag]
+      
+      # このメッセージにもスレッドIDを保存
+      message_tag.tag_threads ||= {}
+      message_tag.tag_threads[tag] = thread_ts
+      message_tag.save!
+      
+      return thread_ts
     end
 
     # なければ新規作成
@@ -245,7 +256,7 @@ class SlackController < ApplicationController
             style: "danger",
             text: { type: "plain_text", text: "このタグを削除" },
             action_id: "delete_tag_thread",
-            value: "#{message_tag.id}:#{tag}",
+            value: "#{user_id}:#{tag}",
             confirm: {
               title: { type: "plain_text", text: "確認" },
               text: { type: "plain_text", text: "このタグのスレッドを削除しますか?" },
@@ -335,33 +346,39 @@ class SlackController < ApplicationController
 
   # タグスレッド全体を削除
   def handle_delete_tag_thread(payload, action)
-    message_tag_id, tag = action["value"].split(":")
-    message_tag = SlackMessageTag.find_by(id: message_tag_id)
+    user_id, tag = action["value"].split(":")
+    
+    # このユーザー、このタグを持つすべてのメッセージを取得
+    message_tags = SlackMessageTag.where(user_id: user_id)
+                                  .where("tags @> ARRAY[?]::varchar[]", tag)
 
-    return unless message_tag
+    return if message_tags.empty?
 
-    thread_ts = message_tag.tag_threads&.[](tag)
-    return unless thread_ts
-
-    # スレッド内のすべてのメッセージを取得して削除
-    begin
+    # 最初のメッセージからスレッドIDを取得
+    thread_ts = message_tags.first.tag_threads&.[](tag)
+    
+    if thread_ts
       # スレッドの親メッセージを削除（スレッド全体が削除される）
-      slack_client.chat_delete(
-        channel: payload["channel"]["id"],
-        ts: thread_ts
-      )
-    rescue => e
-      Rails.logger.error("Failed to delete thread parent: #{e.message}")
+      begin
+        slack_client.chat_delete(
+          channel: payload["channel"]["id"],
+          ts: thread_ts
+        )
+      rescue => e
+        Rails.logger.error("Failed to delete thread parent: #{e.message}")
+      end
     end
 
-    # データベースからタグを削除
-    message_tag.tags.delete(tag)
-    message_tag.tag_threads.delete(tag)
+    # すべてのメッセージからこのタグを削除
+    message_tags.each do |message_tag|
+      message_tag.tags.delete(tag)
+      message_tag.tag_threads&.delete(tag)
 
-    if message_tag.tags.empty?
-      message_tag.destroy
-    else
-      message_tag.save
+      if message_tag.tags.empty?
+        message_tag.destroy
+      else
+        message_tag.save
+      end
     end
   rescue => e
     Rails.logger.error("Failed to delete tag thread: #{e.message}")
