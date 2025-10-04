@@ -247,7 +247,6 @@ class SlackController < ApplicationController
 
   def format_tag_message(tag, message_tag, metadata)
     message_text = metadata["message_text"].to_s.strip
-    # メッセージが長い場合は省略
     display_text = message_text.length > 200 ? "#{message_text[0..200]}..." : message_text
 
     <<~TEXT
