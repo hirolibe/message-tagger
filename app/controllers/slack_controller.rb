@@ -224,7 +224,7 @@ class SlackController < ApplicationController
   def format_tag_message(tag, message_tag, metadata)
     user_name = metadata["message_user_name"] || "Unknown"
     <<~TEXT
-      <#{metadata['permalink']}|@#{user_name} さんのメッセージ>
+      @#{user_name} さんの<#{metadata['permalink']}|メッセージ>
     TEXT
   end
 
