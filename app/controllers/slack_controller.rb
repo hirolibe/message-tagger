@@ -176,7 +176,8 @@ class SlackController < ApplicationController
     slack_client.chat_postMessage(
       channel: dm_channel,
       thread_ts: thread_ts,
-      text: format_tag_message(tag, message_tag, metadata)
+      text: format_tag_message(tag, message_tag, metadata),
+      unfurl_links: false
     )
   end
 
@@ -217,7 +218,7 @@ class SlackController < ApplicationController
 
   def format_tag_message(tag, message_tag, metadata)
     <<~TEXT
-      #{metadata['message_text'].truncate(200)}
+      <@#{metadata['user_id']}> さんのメッセージ
       → <#{metadata['permalink']}|元のメッセージを見る>
     TEXT
   end
