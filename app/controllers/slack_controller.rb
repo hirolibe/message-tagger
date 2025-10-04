@@ -12,12 +12,25 @@ class SlackController < ApplicationController
       handle_tag_submission(payload)
       # モーダルを閉じるために空のレスポンスを返す
       render json: {}, status: :ok
+    when "block_actions"
+      handle_block_actions(payload)
+      head :ok
     else
       head :ok
     end
   end
 
   private
+
+  def handle_block_actions(payload)
+    action = payload["actions"]&.first
+    return unless action
+
+    case action["action_id"]
+    when "delete_tagged_message"
+      handle_delete_tagged_message(payload, action)
+    end
+  end
 
   def handle_shortcut(payload)
     return unless payload["callback_id"] == "add_message_tag"
@@ -173,12 +186,27 @@ class SlackController < ApplicationController
     thread_ts = find_or_create_user_tag_thread(dm_channel, tag, metadata["user_id"], message_tag)
     return unless thread_ts
 
-    # スレッドに返信を追加
+    # スレッドに返信を追加（削除ボタン付き）
     slack_client.chat_postMessage(
       channel: dm_channel,
       thread_ts: thread_ts,
       text: format_tag_message(tag, message_tag, metadata),
-      unfurl_links: false
+      unfurl_links: false,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: format_tag_message(tag, message_tag, metadata)
+          },
+          accessory: {
+            type: "button",
+            text: { type: "plain_text", text: "削除" },
+            action_id: "delete_tagged_message",
+            value: "#{message_tag.id}:#{tag}"
+          }
+        }
+      ]
     )
   end
 
@@ -251,5 +279,33 @@ class SlackController < ApplicationController
     )
   rescue => e
     Rails.logger.error("Failed to post thread reply: #{e.message}")
+  end
+
+  # タグ付けされたメッセージを削除
+  def handle_delete_tagged_message(payload, action)
+    message_tag_id, tag = action["value"].split(":")
+    message_tag = SlackMessageTag.find_by(id: message_tag_id)
+
+    return unless message_tag
+
+    # データベースからタグを削除
+    message_tag.tags.delete(tag)
+
+    if message_tag.tags.empty?
+      # タグがすべて削除されたらレコード自体を削除
+      message_tag.destroy
+    else
+      # tag_threadsからも削除
+      message_tag.tag_threads.delete(tag)
+      message_tag.save
+    end
+
+    # Slackのメッセージを削除
+    slack_client.chat_delete(
+      channel: payload["channel"]["id"],
+      ts: payload["message"]["ts"]
+    )
+  rescue => e
+    Rails.logger.error("Failed to delete tagged message: #{e.message}")
   end
 end
