@@ -29,6 +29,8 @@ class SlackController < ApplicationController
     case action["action_id"]
     when "delete_tagged_message"
       handle_delete_tagged_message(payload, action)
+    when "delete_all_tags"
+      handle_delete_all_tags(payload, action)
     end
   end
 
@@ -198,13 +200,25 @@ class SlackController < ApplicationController
           text: {
             type: "mrkdwn",
             text: format_tag_message(tag, message_tag, metadata)
-          },
-          accessory: {
-            type: "button",
-            text: { type: "plain_text", text: "削除" },
-            action_id: "delete_tagged_message",
-            value: "#{message_tag.id}:#{tag}"
           }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "このタグから削除" },
+              action_id: "delete_tagged_message",
+              value: "#{message_tag.id}:#{tag}"
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "すべて削除" },
+              style: "danger",
+              action_id: "delete_all_tags",
+              value: "#{message_tag.id}"
+            }
+          ]
         }
       ]
     )
@@ -306,5 +320,34 @@ class SlackController < ApplicationController
     )
   rescue => e
     Rails.logger.error("Failed to delete tagged message: #{e.message}")
+  end
+
+  # すべてのタグを削除
+  def handle_delete_all_tags(payload, action)
+    message_tag_id = action["value"]
+    message_tag = SlackMessageTag.find_by(id: message_tag_id)
+
+    return unless message_tag
+
+    # すべてのタグのスレッドメッセージを削除
+    message_tag.tag_threads.each do |_tag, thread_ts|
+      # このスレッド内の対象メッセージを削除（スレッド全体ではなく、このメッセージのみ）
+      # payload["message"]["ts"]が現在のメッセージ（削除ボタンがあるメッセージ）のts
+      begin
+        slack_client.chat_delete(
+          channel: payload["channel"]["id"],
+          ts: payload["message"]["ts"]
+        )
+        # 同じメッセージなので一度削除すれば十分
+        break
+      rescue => e
+        Rails.logger.error("Failed to delete message in thread #{thread_ts}: #{e.message}")
+      end
+    end
+
+    # データベースレコードを完全に削除
+    message_tag.destroy
+  rescue => e
+    Rails.logger.error("Failed to delete all tags: #{e.message}")
   end
 end
