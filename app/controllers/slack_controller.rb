@@ -29,6 +29,8 @@ class SlackController < ApplicationController
     case action["action_id"]
     when "delete_tagged_message"
       handle_delete_tagged_message(payload, action)
+    when "delete_tag_thread"
+      handle_delete_tag_thread(payload, action)
     end
   end
 
@@ -230,7 +232,29 @@ class SlackController < ApplicationController
     # なければ新規作成
     response = slack_client.chat_postMessage(
       channel: channel_id,
-      text: "🏷️ *#{tag}*"
+      text: "🏷️ *#{tag}*",
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "🏷️ *#{tag}*"
+          },
+          accessory: {
+            type: "button",
+            style: "danger",
+            text: { type: "plain_text", text: "このタグを削除" },
+            action_id: "delete_tag_thread",
+            value: "#{message_tag.id}:#{tag}",
+            confirm: {
+              title: { type: "plain_text", text: "確認" },
+              text: { type: "plain_text", text: "このタグのスレッドを削除しますか?" },
+              confirm: { type: "plain_text", text: "削除" },
+              deny: { type: "plain_text", text: "キャンセル" }
+            }
+          }
+        }
+      ]
     )
 
     thread_ts = response["ts"]
@@ -307,5 +331,39 @@ class SlackController < ApplicationController
     )
   rescue => e
     Rails.logger.error("Failed to delete tagged message: #{e.message}")
+  end
+
+  # タグスレッド全体を削除
+  def handle_delete_tag_thread(payload, action)
+    message_tag_id, tag = action["value"].split(":")
+    message_tag = SlackMessageTag.find_by(id: message_tag_id)
+
+    return unless message_tag
+
+    thread_ts = message_tag.tag_threads&.[](tag)
+    return unless thread_ts
+
+    # スレッド内のすべてのメッセージを取得して削除
+    begin
+      # スレッドの親メッセージを削除（スレッド全体が削除される）
+      slack_client.chat_delete(
+        channel: payload["channel"]["id"],
+        ts: thread_ts
+      )
+    rescue => e
+      Rails.logger.error("Failed to delete thread parent: #{e.message}")
+    end
+
+    # データベースからタグを削除
+    message_tag.tags.delete(tag)
+    message_tag.tag_threads.delete(tag)
+
+    if message_tag.tags.empty?
+      message_tag.destroy
+    else
+      message_tag.save
+    end
+  rescue => e
+    Rails.logger.error("Failed to delete tag thread: #{e.message}")
   end
 end
