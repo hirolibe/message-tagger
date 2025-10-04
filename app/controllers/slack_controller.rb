@@ -231,12 +231,12 @@ class SlackController < ApplicationController
 
     if existing_message && existing_message.tag_threads[tag]
       thread_ts = existing_message.tag_threads[tag]
-      
+
       # このメッセージにもスレッドIDを保存
       message_tag.tag_threads ||= {}
       message_tag.tag_threads[tag] = thread_ts
       message_tag.save!
-      
+
       return thread_ts
     end
 
@@ -347,7 +347,7 @@ class SlackController < ApplicationController
   # タグスレッド全体を削除
   def handle_delete_tag_thread(payload, action)
     user_id, tag = action["value"].split(":")
-    
+
     # このユーザー、このタグを持つすべてのメッセージを取得
     message_tags = SlackMessageTag.where(user_id: user_id)
                                   .where("tags @> ARRAY[?]::varchar[]", tag)
@@ -356,7 +356,7 @@ class SlackController < ApplicationController
 
     # 最初のメッセージからスレッドIDを取得
     thread_ts = message_tags.first.tag_threads&.[](tag)
-    
+
     if thread_ts
       # スレッドの親メッセージを削除（スレッド全体が削除される）
       begin
