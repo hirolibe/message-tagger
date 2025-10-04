@@ -2,7 +2,7 @@ Rails.application.routes.draw do
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Root path
-  root to: proc { [200, {}, ["Slack Message Tagger API"]] }
+  root to: proc { [ 200, {}, [ "Slack Message Tagger API" ] ] }
 
   # Slack interactions endpoint
   post "/slack/interactions", to: "slack#interactions"
