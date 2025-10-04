@@ -202,6 +202,7 @@ class SlackController < ApplicationController
           accessory: {
             type: "button",
             text: { type: "plain_text", text: "削除" },
+            style: "primary",
             action_id: "delete_tagged_message",
             value: "#{message_tag.id}:#{tag}"
           }
