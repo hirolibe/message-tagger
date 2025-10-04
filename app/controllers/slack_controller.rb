@@ -82,7 +82,7 @@ class SlackController < ApplicationController
 
     # メッセージ投稿者の情報を取得
     message_user_info = get_user_info(message["user"])
-    
+
     slack_client.views_open(
       trigger_id: payload["trigger_id"],
       view: {
@@ -222,7 +222,7 @@ class SlackController < ApplicationController
   end
 
   def format_tag_message(tag, message_tag, metadata)
-    user_name = metadata['message_user_name'] || "Unknown"
+    user_name = metadata["message_user_name"] || "Unknown"
     <<~TEXT
       <#{metadata['permalink']}|@#{user_name} さんのメッセージ>
     TEXT
