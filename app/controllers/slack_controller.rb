@@ -218,8 +218,13 @@ class SlackController < ApplicationController
   end
 
   def format_tag_message(tag, message_tag, metadata)
+    message_text = metadata["message_text"].to_s.strip
+    # メッセージが長い場合は省略
+    display_text = message_text.length > 200 ? "#{message_text[0..200]}..." : message_text
+
     <<~TEXT
       <@#{metadata['message_user_id']}> さんの<#{metadata['permalink']}|メッセージ>
+      #{display_text}
     TEXT
   end
 
